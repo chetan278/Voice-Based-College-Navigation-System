@@ -1,10 +1,13 @@
 import gradio as gr
-import folium
 from collections import deque
 import threading
 import os
 import tempfile
 from pathlib import Path
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
+import numpy as np
 
 # Try to import pyttsx3, but make it optional
 try:
@@ -28,16 +31,16 @@ college_map = {
     "CSE Block": ["Gate 2", "Boys Hostel"]
 }
 
-# Coordinates (approximate for Folium map)
+# Coordinates for matplotlib (scaled for better visualization)
 coordinates = {
-    "Gate 1": [30.2730, 78.9990],
-    "Gate 2": [30.2748, 78.9994],
-    "Cafeteria": [30.2734, 78.9993],
-    "BTech Block": [30.2737, 78.9996],
-    "Santosh Library": [30.2739, 78.9999],
-    "Ravi Canteen": [30.2741, 78.9997],
-    "Boys Hostel": [30.2745, 79.0000],
-    "CSE Block": [30.2750, 78.9997]
+    "Gate 1": [0, 0],
+    "Gate 2": [1.8, 0.4],
+    "Cafeteria": [0.4, 0.3],
+    "BTech Block": [0.7, 0.6],
+    "Santosh Library": [0.9, 0.9],
+    "Ravi Canteen": [1.1, 0.7],
+    "Boys Hostel": [1.5, 1.0],
+    "CSE Block": [2.0, 0.7]
 }
 
 def speak_async(text):
@@ -80,96 +83,138 @@ def find_path(start, end):
     
     return None
 
-def generate_map(path):
-    """Generate an interactive Folium map with the route highlighted"""
+def generate_map_matplotlib(path):
+    """Generate a matplotlib map with the route highlighted"""
     if not path or len(path) == 0:
         return None
     
-    start = path[0]
-    # Center map on starting location
-    m = folium.Map(
-        location=coordinates[start], 
-        zoom_start=17,
-        tiles='OpenStreetMap'
-    )
-
-    # Add markers for all locations
-    for place, coord in coordinates.items():
-        if place == path[0]:
-            # Start location - green
-            icon = folium.Icon(color='green', icon='play', prefix='fa')
-            popup_text = f"<b>START: {place}</b>"
-        elif place == path[-1]:
-            # End location - red
-            icon = folium.Icon(color='red', icon='flag-checkered', prefix='fa')
-            popup_text = f"<b>DESTINATION: {place}</b>"
-        elif place in path:
-            # Waypoint - orange
-            icon = folium.Icon(color='orange', icon='info-sign')
-            popup_text = f"<b>Waypoint: {place}</b>"
-        else:
-            # Other locations - blue
-            icon = folium.Icon(color='blue', icon='info-sign')
-            popup_text = f"<b>{place}</b>"
-        
-        folium.Marker(
-            coord, 
-            popup=popup_text, 
-            tooltip=place,
-            icon=icon
-        ).add_to(m)
-
-    # Draw path line if more than one location
+    # Create figure with higher DPI for better quality
+    fig, ax = plt.subplots(figsize=(14, 10), dpi=100)
+    
+    # Set background color
+    fig.patch.set_facecolor('#f0f0f0')
+    ax.set_facecolor('#ffffff')
+    
+    # Draw all connections (edges) first in light gray
+    for location, neighbors in college_map.items():
+        x1, y1 = coordinates[location]
+        for neighbor in neighbors:
+            x2, y2 = coordinates[neighbor]
+            ax.plot([x1, x2], [y1, y2], 'gray', linewidth=1, alpha=0.3, zorder=1)
+    
+    # Draw the path with arrows and gradient effect
     if len(path) > 1:
-        path_coords = [coordinates[p] for p in path]
-        folium.PolyLine(
-            path_coords, 
-            color="red", 
-            weight=5, 
-            opacity=0.7,
-            popup="<b>Your Route</b>"
-        ).add_to(m)
-        
-        # Add numbered circle markers for each step
-        for idx, place in enumerate(path):
-            folium.CircleMarker(
-                location=coordinates[place],
-                radius=12,
-                popup=f"<b>Step {idx + 1}: {place}</b>",
-                color='darkred',
-                fill=True,
-                fillColor='red',
-                fillOpacity=0.6,
-                weight=2
-            ).add_to(m)
+        for i in range(len(path) - 1):
+            x1, y1 = coordinates[path[i]]
+            x2, y2 = coordinates[path[i + 1]]
             
-            # Add step numbers as overlay
-            folium.Marker(
-                location=coordinates[place],
-                icon=folium.DivIcon(
-                    html=f'''<div style="
-                        font-size: 11pt; 
-                        color: white; 
-                        font-weight: bold;
-                        text-align: center;
-                        text-shadow: 1px 1px 2px black;
-                    ">{idx + 1}</div>'''
-                )
-            ).add_to(m)
-
-    # Save to temporary HTML file
+            # Draw thick path line
+            ax.plot([x1, x2], [y1, y2], 'red', linewidth=4, alpha=0.7, zorder=2)
+            
+            # Add arrow
+            arrow = FancyArrowPatch(
+                (x1, y1), (x2, y2),
+                arrowstyle='->', 
+                color='darkred', 
+                linewidth=2,
+                mutation_scale=20,
+                zorder=3
+            )
+            ax.add_patch(arrow)
+    
+    # Plot all locations as nodes
+    for place, coord in coordinates.items():
+        x, y = coord
+        
+        if place == path[0]:
+            # Start location - large green circle
+            circle = plt.Circle((x, y), 0.08, color='green', alpha=0.8, zorder=4)
+            ax.add_patch(circle)
+            ax.plot(x, y, 'o', color='darkgreen', markersize=20, zorder=5)
+            ax.text(x, y-0.15, '🚀 START', ha='center', va='top', 
+                   fontsize=10, fontweight='bold', color='green',
+                   bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor='green', linewidth=2))
+            
+        elif place == path[-1]:
+            # End location - large red circle with flag
+            circle = plt.Circle((x, y), 0.08, color='red', alpha=0.8, zorder=4)
+            ax.add_patch(circle)
+            ax.plot(x, y, 'o', color='darkred', markersize=20, zorder=5)
+            ax.text(x, y-0.15, '🏁 DESTINATION', ha='center', va='top', 
+                   fontsize=10, fontweight='bold', color='red',
+                   bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor='red', linewidth=2))
+            
+        elif place in path:
+            # Waypoint - orange circle with step number
+            step_num = path.index(place) + 1
+            circle = plt.Circle((x, y), 0.06, color='orange', alpha=0.8, zorder=4)
+            ax.add_patch(circle)
+            ax.plot(x, y, 'o', color='darkorange', markersize=16, zorder=5)
+            ax.text(x, y, str(step_num), ha='center', va='center', 
+                   fontsize=11, fontweight='bold', color='white', zorder=6)
+            
+        else:
+            # Other locations - blue circles
+            circle = plt.Circle((x, y), 0.05, color='lightblue', alpha=0.6, zorder=4)
+            ax.add_patch(circle)
+            ax.plot(x, y, 'o', color='blue', markersize=12, zorder=5)
+        
+        # Add location labels
+        label_y_offset = 0.12 if place not in [path[0], path[-1]] else 0.25
+        ax.text(x, y+label_y_offset, place, ha='center', va='bottom', 
+               fontsize=9, fontweight='bold',
+               bbox=dict(boxstyle='round,pad=0.4', facecolor='white', 
+                        edgecolor='black', alpha=0.7, linewidth=1))
+    
+    # Add step numbers for path locations
+    for idx, place in enumerate(path):
+        x, y = coordinates[place]
+        if place not in [path[0], path[-1]]:  # Skip start and end
+            ax.text(x+0.15, y+0.15, f'Step {idx+1}', ha='left', va='bottom',
+                   fontsize=8, style='italic', color='darkred',
+                   bbox=dict(boxstyle='round,pad=0.2', facecolor='lightyellow', alpha=0.8))
+    
+    # Set axis properties
+    ax.set_xlim(-0.3, 2.3)
+    ax.set_ylim(-0.3, 1.3)
+    ax.set_aspect('equal')
+    ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
+    
+    # Title and labels
+    route_str = " → ".join(path)
+    ax.set_title(f'🗺️ GEU Campus Navigation Map\nRoute: {route_str}', 
+                fontsize=14, fontweight='bold', pad=20)
+    ax.set_xlabel('Campus West → East', fontsize=11, fontweight='bold')
+    ax.set_ylabel('Campus South → North', fontsize=11, fontweight='bold')
+    
+    # Add legend
+    legend_elements = [
+        mpatches.Patch(color='green', label='Start Location'),
+        mpatches.Patch(color='red', label='Destination'),
+        mpatches.Patch(color='orange', label='Waypoints'),
+        mpatches.Patch(color='lightblue', label='Other Locations'),
+        mpatches.Patch(color='red', alpha=0.7, label='Suggested Route')
+    ]
+    ax.legend(handles=legend_elements, loc='upper right', 
+             fontsize=9, framealpha=0.9, edgecolor='black')
+    
+    # Tight layout
+    plt.tight_layout()
+    
+    # Save to temporary file
     try:
         temp_file = tempfile.NamedTemporaryFile(
             delete=False, 
-            suffix='.html', 
-            mode='w',
-            encoding='utf-8'
+            suffix='.png', 
+            mode='wb'
         )
-        m.save(temp_file.name)
-        temp_file.close()
+        plt.savefig(temp_file.name, dpi=150, bbox_inches='tight', 
+                   facecolor='#f0f0f0', edgecolor='none')
+        plt.close(fig)
         return temp_file.name
     except Exception as e:
         print(f"Error generating map: {e}")
+        plt.close(fig)
         return None
 
 def calculate_distance(path):
@@ -219,8 +264,8 @@ def navigate(start_location, end_location, enable_voice):
         speak_async("You have reached your destination.")
         voice_instructions.append(f"🏁 Destination reached: **{end_location}**")
     
-    # Generate interactive map
-    map_file = generate_map(path)
+    # Generate matplotlib map
+    map_file = generate_map_matplotlib(path)
     
     # Create result message
     path_str = " → ".join(path)
@@ -241,18 +286,7 @@ def navigate(start_location, end_location, enable_voice):
     # Voice instructions text
     voice_text = "\n".join(voice_instructions) if voice_instructions else "🔇 Voice navigation disabled"
     
-    # Read map file and return HTML content
-    map_html = None
-    if map_file and os.path.exists(map_file):
-        try:
-            with open(map_file, 'r', encoding='utf-8') as f:
-                map_html = f.read()
-            # Clean up temp file after reading
-            os.unlink(map_file)
-        except Exception as e:
-            print(f"Error reading map file: {e}")
-    
-    return result_message, map_html, voice_text
+    return result_message, map_file, voice_text
 
 # Create Gradio Interface
 with gr.Blocks(title="🎓 GEU Campus Navigation", theme=gr.themes.Soft()) as app:
@@ -307,7 +341,7 @@ with gr.Blocks(title="🎓 GEU Campus Navigation", theme=gr.themes.Soft()) as ap
         
         with gr.Column(scale=2):
             gr.Markdown("### 🗺️ Interactive Campus Map")
-            map_output = gr.HTML(label="Route Visualization")
+            map_output = gr.Image(label="Route Visualization", type="filepath")
     
     gr.Markdown("""
     ---
@@ -324,13 +358,13 @@ with gr.Blocks(title="🎓 GEU Campus Navigation", theme=gr.themes.Soft()) as ap
     2. 🎯 Choose your **destination**
     3. 🔊 Toggle voice navigation (if available)
     4. 🧭 Click **Start Navigation** to get the shortest route
-    5. 🗺️ Follow the numbered waypoints on the interactive map
+    5. 🗺️ Follow the numbered waypoints on the map
     
-    ### 🔍 Features:
+    ### 🎨 Features:
     
     - ⚡ **BFS Algorithm** for shortest path calculation
     - 🎤 **Voice Guidance** with step-by-step instructions
-    - 🗺️ **Interactive Map** with color-coded markers
+    - 🗺️ **Matplotlib Visualization** with color-coded markers
     - 📏 **Distance Estimation** for route planning
     """)
     
